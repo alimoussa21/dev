@@ -1,0 +1,118 @@
+version: '3.8'
+
+networks:
+  laravel_dotnet_network:
+    driver: bridge
+  node_dotnet_network:
+    driver: bridge
+
+services:
+  laravel_app:
+    image: php:8.2-fpm-alpine
+    container_name: laravel_app
+    working_dir: /var/www/html
+    volumes:
+      - ./laravel:/var/www/html/laravel
+    environment:
+      WEB_DOCUMENT_ROOT: /var/www/html/public
+      APP_ENV: production
+      DB_CONNECTION: pgsql
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_DATABASE: laravel
+      DB_USERNAME: user
+      DB_PASSWORD: password
+    ports:
+      - "9000:8000"
+    depends_on:
+      - db
+    networks:
+      - laravel_dotnet_network
+    command: >
+      sh -c "apk add --no-cache git curl postgresql-dev && \
+              docker-php-ext-install pdo pdo_pgsql && \
+              apk add --no-cache nodejs npm && \
+              curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer && \
+              cd /var/www/html/laravel/ && \
+              composer install && \
+              npm install && npm run build && \
+              php artisan migrate && \
+              mv ./.env.example ./.env && \            
+              php artisan key:generate && \
+              php artisan serve --host=0.0.0.0 --port=8000"
+
+  db:
+    image: postgres:alpine
+    container_name: postgres_db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: laravel
+    volumes:
+      - ./db:/var/lib/postgresql/data
+    networks:
+      - laravel_dotnet_network
+    ports:
+      - "5432:5432"
+
+  sqlserver_db:
+    image: mcr.microsoft.com/mssql/server:latest
+    container_name: sqlserver_db
+    environment:
+      SA_PASSWORD: StrongPassword123
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - ./sqlserver:/var/opt/mssql
+    networks:
+      - laravel_dotnet_network
+
+  dotnet_api-build:
+    image: mcr.microsoft.com/dotnet/sdk:8.0
+    container_name: dotnet_api-build
+    working_dir: /app
+    volumes:
+      - ./dotnet-api:/app
+    command: >
+      sh -c "dotnet restore Metheo.Api/Metheo.Api.csproj && \
+              dotnet publish Metheo.Api/Metheo.Api.csproj -c Release -o /app/publish /p:UseAppHost=false"
+
+  dotnet_api:
+    image: mcr.microsoft.com/dotnet/aspnet:8.0-alpine
+    container_name: dotnet_api
+    working_dir: /app
+    volumes:
+      - ./dotnet-api:/app
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+    ports:
+      - "5000:80"
+    depends_on:
+      - db
+      - sqlserver_db
+      - dotnet_api-build
+    networks:
+      - laravel_dotnet_network
+      - node_dotnet_network
+    command: ["dotnet", "/app/publish/Metheo.Api.dll"]
+
+  # react_app:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: react_app
+  #   working_dir: /app
+  #   volumes:
+  #     - ./react:/app
+  #   ports:
+  #     - "3000:3000"
+  #   depends_on:
+  #     - dotnet_api
+  #   networks:
+  #     - node_dotnet_network
+
+volumes:
+  sqlserver_data:
+  postgres_data:
